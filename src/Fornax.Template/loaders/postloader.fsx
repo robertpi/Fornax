@@ -14,6 +14,7 @@ type Post = {
     published: System.DateTime option
     tags: string list
     content: string
+    contentSummary: string
 }
 
 let contentDir = "posts"
@@ -27,25 +28,31 @@ let markdownPipeline =
 let isSeparator (input : string) =
     input.StartsWith "---"
 
+let isSummarySeparator (input: string) = 
+    input.Contains "<!--more-->"
+
 ///`fileContent` - content of page to parse. Usually whole content of `.md` file
 ///returns content of config that should be used for the page
 let getConfig (fileContent : string) =
     let fileContent = fileContent.Split '\n'
     let fileContent = fileContent |> Array.skip 1 //First line must be ---
     let indexOfSeperator = fileContent |> Array.findIndex isSeparator
-    let splitKey (line: string) = 
-        let seperatorIndex = line.IndexOf(':')
-        if seperatorIndex > 0 then
-            let key = line.[.. seperatorIndex - 1].Trim().ToLower()
-            let value = line.[seperatorIndex + 1 ..].Trim() 
-            Some(key, value)
-        else 
-            None
-    fileContent
-    |> Array.splitAt indexOfSeperator
-    |> fst
-    |> Seq.choose splitKey
-    |> Map.ofSeq
+    let _, content = fileContent |> Array.splitAt indexOfSeperator
+
+    let summary, content =
+        match content |> Array.tryFindIndex isSummarySeparator with
+        | Some indexOfSummary -> 
+            let summary, _ = content |> Array.splitAt indexOfSummary
+            summary, content
+        | None -> 
+            content, content 
+    
+    let summary = summary |> Array.skip 1 |> String.concat "\n"
+    let content = content |> Array.skip 1 |> String.concat "\n"
+
+    Markdown.ToHtml(summary, markdownPipeline),
+    Markdown.ToHtml(content, markdownPipeline)
+
 
 ///`fileContent` - content of page to parse. Usually whole content of `.md` file
 ///returns HTML version of content of the page
@@ -65,7 +72,7 @@ let loadFile n =
     let text = System.IO.File.ReadAllText n
 
     let config = getConfig text
-    let content = getContent text
+    let summary, content = getContent text
 
     let file = System.IO.Path.Combine(contentDir, (n |> System.IO.Path.GetFileNameWithoutExtension) + ".md").Replace("\\", "/")
     let link = "/" + System.IO.Path.Combine(contentDir, (n |> System.IO.Path.GetFileNameWithoutExtension) + ".html").Replace("\\", "/")
@@ -87,7 +94,8 @@ let loadFile n =
       author = author
       published = published
       tags = tags
-      content = content }
+      content = content
+      contentSummary = summary }
 
 let loader (projectRoot: string) (siteContent: SiteContents) =
     let postsPath = System.IO.Path.Combine(projectRoot, contentDir)
